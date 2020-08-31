@@ -1,9 +1,12 @@
+; "main" is exported since I use (for now) LIBC functions
 global main
 
+; Define Constants
 %define WIDTH       30
 %define HEIGHT      30
 %define PIXEL_COUNT (WIDTH * HEIGHT)
 
+; External LIBC Functions (I try to use as less as possible here)
 extern system
 extern snprintf
 
