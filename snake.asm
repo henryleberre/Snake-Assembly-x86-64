@@ -2,9 +2,11 @@
 global main
 
 ; Define Constants
-%define WIDTH       30
-%define HEIGHT      30
-%define PIXEL_COUNT (WIDTH * HEIGHT)
+%define WIDTH                     30
+%define HEIGHT                    30
+%define PIXEL_COUNT               (WIDTH * HEIGHT)
+%define SNAKE_BUFFER_SIZE         (PIXEL_COUNT * 2)
+%define SNAKE_BUFFER_SIZE_ALIGNED (SNAKE_BUFFER_SIZE & 0xFFFFFFFFF0)
 
 ; External LIBC Functions (I try to use as less as possible here)
 extern system
@@ -12,12 +14,37 @@ extern snprintf
 
 section .text
 
+; Function "hide_user_input":
+; - No Arguments
+hide_user_input:
+    sub rsp, 8 ; Prepare RSP For Function Call
+
+    mov rax, 1                    ; RAX (Argument 1): Syscall #1     : Write
+    mov rdi, 1                    ; RDI (Argument 2): File Handle #1 : Stdout
+    mov rsi, CLEAR_STDOUT_CMD     ; RSI (Argument 3): String Buffer
+    mov rdx, CLEAR_STDOUT_CMD_LEN ; RDX (Argument 4): String Length
+    syscall
+
+    add rsp, 8  ; Restore RSP
+    ret         ; Return
+
 ; Function "clear_terminal":
 ; - No Arguments
 clear_terminal:
     sub rsp, 8 ; Prepare RSP For Function Call
 
-    mov  rdi, SSTY_HIDE_USER_INPUT_CMD
+    mov  rdi, STTY_HIDE_USER_INPUT_CMD
+    call system
+
+    add rsp, 8  ; Restore RSP
+    ret         ; Return
+
+; Function "show_user_input":
+; - No Arguments
+show_user_input:
+    sub rsp, 8 ; Prepare RSP For Function Call
+
+    mov  rdi, STTY_SHOW_USER_INPUT_CMD
     call system
 
     add rsp, 8  ; Restore RSP
@@ -111,13 +138,49 @@ sleep_for:
     ret        ; Return
 
 main:
-    ; Main Prologue
+main_prologue:
     push rbp
     mov  rbp, rsp
 
-    
+setup_terminal:
+    call clear_terminal
+    call hide_user_input
 
-    ; Main Epilogue
+setup_initial_memory:
+    ; Allocate Temporary Variables
+    sub rsp, 64
+    mov word[rbp - 2], 2 ; Snake Length
+    mov byte[rbp - 3], 0 ; Apple X Position
+    mov byte[rbp - 4], 0 ; Apple Y Position
+
+    ; Allocate Snake Buffer
+    sub rsp, SNAKE_BUFFER_SIZE_ALIGNED
+    mov byte[rbp - 64],     1 ; Head X Position
+    mov byte[rbp - 64 - 1], 0 ; Head Y Position
+    mov byte[rbp - 64 - 2], 0 ; Tail X Position
+    mov byte[rbp - 64 - 3], 0 ; Tail Y Position
+    
+game_loop_body:
+    ; Sleep Until Next Iteration
+    mov rdi, 1 ; s
+    mov rsi, 0 ; ns
+    call sleep_for
+
+    render_and_update_snake_loop_body:
+        
+
+        jmp render_and_update_snake_loop_body
+
+    jmp game_loop_body
+
+game_loop_end:
+
+
+restore_terminal:
+    call clear_terminal
+    call show_user_input
+
+main_epilogue:
     mov rsp, rbp
     pop rbp
 
@@ -131,6 +194,6 @@ SNAKE_CHAR:               db  'O'
 CLEAR_STDOUT_CMD:         db  27,"[H",27,"[2J"
 CLEAR_STDOUT_CMD_LEN:     equ $-CLEAR_STDOUT_CMD
 MOVE_CURSOR_CMD:          db  0x1B, "[%d;%df", 0
-SSTY_HIDE_USER_INPUT_CMD: db  "stty -echo", 0
-SSTY_SHOW_USER_INPUT_CMD: db  "ssty echo",  0
+STTY_HIDE_USER_INPUT_CMD: db  "stty -echo", 0
+STTY_SHOW_USER_INPUT_CMD: db  "stty echo",  0
 KEYBOARD_EVENT_FILE_PATH: db  "/dev/input/event10" ; Can Vary
