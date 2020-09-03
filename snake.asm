@@ -103,12 +103,12 @@ print_string:
 print_string_at_position: ; x(0-->2^64-1), y0-2^64-1), char*, len
     ; Setup The Stack And Save Variables
     sub rsp, 24              ; Allocate Space (While Preparing The Stack)
-    mov qword[rsp - 8],  rdx ; Save RDX
+    mov qword[rsp + 8],  rdx ; Save RDX
     mov qword[rsp],      rcx ; Save RCX
 
     call move_cursor_to_location      ; Move Terminal Cursor
 
-    mov rdx, qword[rsp - 8] ; RDX (Argument 3): The String Buffer
+    mov rdx, qword[rsp + 8] ; RDX (Argument 3): The String Buffer
     mov rcx, qword[rsp]     ; RCX (Argument 4): The String Length
     call print_string
 
@@ -149,29 +149,55 @@ setup_terminal:
 setup_initial_memory:
     ; Allocate Temporary Variables
     sub rsp, 64
-    mov word[rbp - 2], 2 ; Snake Length
-    mov byte[rbp - 3], 0 ; Apple X Position
-    mov byte[rbp - 4], 0 ; Apple Y Position
+    mov word [rbp - 2],  2 ; Snake Length
+    mov byte [rbp - 3],  0 ; Apple X Position
+    mov byte [rbp - 4],  0 ; Apple Y Position
+    mov qword[rbp - 12], 0 ; Reserved For The Memory Address Of The Snake Buffer
+    mov qword[rbp - 20], 0 ; Resorved For Saving A Register Value
 
     ; Allocate Snake Buffer
     sub rsp, SNAKE_BUFFER_SIZE_ALIGNED
-    mov byte[rbp - 64],     1 ; Head X Position
-    mov byte[rbp - 64 - 1], 0 ; Head Y Position
-    mov byte[rbp - 64 - 2], 0 ; Tail X Position
-    mov byte[rbp - 64 - 3], 0 ; Tail Y Position
-    
+    mov byte[rsp + 0], 1 ; Head X Position
+    mov byte[rsp + 1], 0 ; Head Y Position
+    mov byte[rsp + 2], 0 ; Tail X Position
+    mov byte[rsp + 3], 0 ; Tail Y Position
+
+    mov qword[rbp - 12], rsp ; Save The Memory Address Of The Snake Buffer
+
 game_loop_body:
     ; Sleep Until Next Iteration
     mov rdi, 1 ; s
     mov rsi, 0 ; ns
     call sleep_for
 
+    ; Setup Loop Index
+    movzx rax, word[rbp - 2] ; Snake Length
+    shl   rax, 1             ; Double Snake Length (2 Bytes Per Snake Cell)
     render_and_update_snake_loop_body:
-        
+        ; Loop Backwards Through Snake
+        cmp rax, 0
+        jle render_and_update_snake_loop_end
 
+        ; Save RAX
+        mov qword[rbp - 20], rax
+
+        ; Print The Snake Cell
+        mov   r8,  qword[rbp - 12] ; Snake Buffer Pointer
+        movzx rdi, byte[r8 + rax - 2] ; Cell X Position
+        movzx rsi, byte[r8 + rax - 1] ; Cell Y Position
+        mov   rdx, SNAKE_CHAR
+        mov   rcx, 1
+        call  print_string_at_position
+
+        ; Restore RAX
+        mov rax, qword[rbp - 20]
+
+        ; Loop Backwards Through Snake
+        sub rax, 2 ; Remove 2 Bytes From RAX (One Snake Cell)
         jmp render_and_update_snake_loop_body
 
-    jmp game_loop_body
+    render_and_update_snake_loop_end:
+        jmp game_loop_body
 
 game_loop_end:
 
