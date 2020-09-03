@@ -157,6 +157,8 @@ setup_initial_memory:
     mov byte [rbp - 4],  0 ; Apple Y Position
     mov qword[rbp - 12], 0 ; Reserved For The Memory Address Of The Snake Buffer
     mov qword[rbp - 20], 0 ; Resorved For Saving A Register Value
+    mov byte [rbp - 21], 1 ; Snake Head X Delta Position
+    mov byte [rbp - 22], 0 ; Snake Head Y Delta Position
 
     ; Allocate Snake Buffer
     sub rsp, SNAKE_BUFFER_SIZE_ALIGNED
@@ -173,33 +175,68 @@ game_loop_body:
     mov rsi, 0 ; ns
     call sleep_for
 
-   ; Setup Loop Index
+    ; Unrender tail
+    mov   r8,  qword[rbp - 12] ; Snake Buffer Pointer
+    movzx r9, word[rbp - 2]
+    shl r9, 1
+    movzx rdi, byte[r8 + r9 - 2] ; Cell X Position
+    movzx rsi, byte[r8 + r9 - 1] ; Cell Y Position
+    mov   rdx, EMPTY_CHAR
+    mov   rcx, 1
+    call  print_string_at_position
+    
+    ; Setup Loop Index
     movzx rax, word[rbp - 2] ; Snake Length
     shl   rax, 1             ; Double Snake Length (2 Bytes Per Snake Cell)
-    render_and_update_snake_loop_body:
+    snake_loop_body:
         ; Loop Backwards Through Snake
         cmp rax, 0
-        jle render_and_update_snake_loop_end
+        jle snake_loop_end
 
-        ; Save RAX
-        mov qword[rbp - 20], rax
+        mov r8, qword[rbp - 12] ; Snake Buffer Pointer
+        add r8, rax
+;
+        ;; Move Cell
+        cmp rax, 2
+        je move_snake_head_cell
 
-        ; Print The Snake Cell
-        mov   r8,  qword[rbp - 12] ; Snake Buffer Pointer
-        movzx rdi, byte[r8 + rax - 2] ; Cell X Position
-        movzx rsi, byte[r8 + rax - 1] ; Cell Y Position
-        mov   rdx, SNAKE_CHAR
-        mov   rcx, 1
-        call  print_string_at_position
+        move_snake_generic_cell: ; Move Non Head Cell
+            mov cl, byte[r8 - 4] ; New Cell X Position
+            mov byte[r8 - 2], cl ; Store New X
 
-        ; Restore RAX
-        mov rax, qword[rbp - 20]
+            mov cl, byte[r8 - 3] ; New Cell Y Position
+            mov byte[r8 - 1], cl ; Store New Y
 
-        ; Loop Backwards Through Snake
-        sub rax, 2 ; Remove 2 Bytes From RAX (One Snake Cell)
-        jmp render_and_update_snake_loop_body
+        jmp snake_loop_body_continue
 
-    render_and_update_snake_loop_end:
+        move_snake_head_cell:    ; Move Head Cell
+            mov cl, byte[r8 - 2] ; Fetch Cell X Position
+            add cl, byte[rbp - 21]     ; Snake Head X Delta Movement
+            mov byte[r8 - 2], cl ; Store New X
+
+            mov cl, byte[r8 - 1] ; Fetch Cell Y Position
+            add cl, byte[rbp - 22]     ; Snake Head Y Delta Movement
+            mov byte[r8 - 1], cl ; Store New Y
+
+        snake_loop_body_continue:
+            ; Save RAX
+            mov qword[rbp - 20], rax
+
+            ; Print The Snake Cell
+            movzx rdi, byte[r8 - 2] ; Cell X Position
+            movzx rsi, byte[r8 - 1] ; Cell Y Position
+            mov   rdx, SNAKE_CHAR
+            mov   rcx, 1
+            call  print_string_at_position
+
+            ; Restore RAX
+            mov rax, qword[rbp - 20]
+
+            ; Loop Backwards Through Snake
+            sub rax, 2 ; Remove 2 Bytes From RAX (One Snake Cell)
+            jmp snake_loop_body
+
+    snake_loop_end:
         jmp game_loop_body
 
 game_loop_end:
