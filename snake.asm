@@ -162,7 +162,7 @@ setup_initial_memory:
 
     ; Allocate Snake Buffer
     sub rsp, SNAKE_BUFFER_SIZE_ALIGNED
-    mov byte[rsp + 0], 1 ; Head X Position
+    mov byte[rsp + 0], 3 ; Head X Position
     mov byte[rsp + 1], 0 ; Head Y Position
     mov byte[rsp + 2], 0 ; Tail X Position
     mov byte[rsp + 3], 0 ; Tail Y Position
@@ -187,44 +187,44 @@ game_loop_body:
     
     ; Setup Loop Index
     movzx rax, word[rbp - 2] ; Snake Length
-    shl   rax, 1             ; Double Snake Length (2 Bytes Per Snake Cell)
-    snake_loop_body:
-        ; Loop Backwards Through Snake
-        cmp rax, 0
-        jle snake_loop_end
+    sub   rax, 1             ; Snake Length - 1 (i.e the tail's index)
 
+    snake_loop_body:
+        ; Setup R8 To Point To The Memory Location Of The Current Cell's X Position
         mov r8, qword[rbp - 12] ; Snake Buffer Pointer
+        shl rax, 1
         add r8, rax
-;
-        ;; Move Cell
-        cmp rax, 2
+        shr rax, 1
+
+        ; Move Cell
+        cmp rax, 0
         je move_snake_head_cell
 
         move_snake_generic_cell: ; Move Non Head Cell
-            mov cl, byte[r8 - 4] ; New Cell X Position
-            mov byte[r8 - 2], cl ; Store New X
+            mov cl, byte[r8 - 2] ; New Cell X Position
+            mov byte[r8], cl     ; Store New X
 
-            mov cl, byte[r8 - 3] ; New Cell Y Position
-            mov byte[r8 - 1], cl ; Store New Y
+            mov cl, byte[r8 - 1] ; New Cell Y Position
+            mov byte[r8 + 1], cl ; Store New Y
 
         jmp snake_loop_body_continue
 
-        move_snake_head_cell:    ; Move Head Cell
-            mov cl, byte[r8 - 2] ; Fetch Cell X Position
-            add cl, byte[rbp - 21]     ; Snake Head X Delta Movement
-            mov byte[r8 - 2], cl ; Store New X
+        move_snake_head_cell: ; Move Head Cell
+            mov cl, byte[r8]       ; Fetch Cell X Position
+            add cl, byte[rbp - 21] ; Snake Head X Delta Movement
+            mov byte[r8], cl       ; Store New X
 
-            mov cl, byte[r8 - 1] ; Fetch Cell Y Position
-            add cl, byte[rbp - 22]     ; Snake Head Y Delta Movement
-            mov byte[r8 - 1], cl ; Store New Y
+            mov cl, byte[r8 + 1]   ; Fetch Cell Y Position
+            add cl, byte[rbp - 22] ; Snake Head Y Delta Movement
+            mov byte[r8 + 1], cl   ; Store New Y
 
         snake_loop_body_continue:
             ; Save RAX
             mov qword[rbp - 20], rax
 
             ; Print The Snake Cell
-            movzx rdi, byte[r8 - 2] ; Cell X Position
-            movzx rsi, byte[r8 - 1] ; Cell Y Position
+            movzx rdi, byte[r8]     ; Cell X Position
+            movzx rsi, byte[r8 + 1] ; Cell Y Position
             mov   rdx, SNAKE_CHAR
             mov   rcx, 1
             call  print_string_at_position
@@ -232,8 +232,12 @@ game_loop_body:
             ; Restore RAX
             mov rax, qword[rbp - 20]
 
-            ; Loop Backwards Through Snake
-            sub rax, 2 ; Remove 2 Bytes From RAX (One Snake Cell)
+            ; End the loop if this was the last cell's index (i.e the head's)
+            cmp rax, 0
+            je  snake_loop_end
+
+            ; Otherwise, continue to loop backwards through the snake
+            sub rax, 1
             jmp snake_loop_body
 
     snake_loop_end:
