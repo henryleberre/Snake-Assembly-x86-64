@@ -58,6 +58,9 @@ show_user_input:
 move_cursor_to_location:
     sub rsp, 24 ; Allocate Destination snprintf Buffer
 
+    inc rdi
+    inc rsi
+
     ; Create Format String To Move Cursor
     mov rcx, rsi             ; RCX (Argument 4): Y Position (For Format String)
     mov r8,  rdi             ; R8  (Argument 5): X Position (For Format String)
@@ -108,8 +111,8 @@ print_string_at_position: ; x(0-->2^64-1), y0-2^64-1), char*, len
 
     call move_cursor_to_location      ; Move Terminal Cursor
 
-    mov rdx, qword[rsp + 8] ; RDX (Argument 3): The String Buffer
-    mov rcx, qword[rsp]     ; RCX (Argument 4): The String Length
+    mov rdi, qword[rsp + 8] ; RDI (Argument 1): The String Buffer (From RDX)
+    mov rsi, qword[rsp]     ; RSI (Argument 2): The String Length (From RCX)
     call print_string
 
     add rsp, 24 ; Restore RSP
@@ -170,7 +173,7 @@ game_loop_body:
     mov rsi, 0 ; ns
     call sleep_for
 
-    ; Setup Loop Index
+   ; Setup Loop Index
     movzx rax, word[rbp - 2] ; Snake Length
     shl   rax, 1             ; Double Snake Length (2 Bytes Per Snake Cell)
     render_and_update_snake_loop_body:
