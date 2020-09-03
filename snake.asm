@@ -8,6 +8,14 @@ global main
 %define SNAKE_BUFFER_SIZE         (PIXEL_COUNT * 2)
 %define SNAKE_BUFFER_SIZE_ALIGNED (SNAKE_BUFFER_SIZE & 0xFFFFFFFFF0)
 
+%define O_RDONLY                  (0)
+%define O_NONBLOCK                (00004000)
+%define KEYBOARD_EVENT_FILE_FLAGS (O_RDONLY | O_NONBLOCK)
+
+%define INPUT_EVENT_STRUCT_SIZE   (24)
+%define INPUT_EVENT_BUFFER_LENGTH (100)
+%define INPUT_EVENT_BUFFER_SIZE (INPUT_EVENT_STRUCT_SIZE * INPUT_EVENT_BUFFER_LENGTH)
+
 ; External LIBC Functions (I try to use as less as possible here)
 extern system
 extern snprintf
@@ -159,6 +167,7 @@ setup_initial_memory:
     mov qword[rbp - 20], 0 ; Resorved For Saving A Register Value
     mov byte [rbp - 21], 1 ; Snake Head X Delta Position
     mov byte [rbp - 22], 0 ; Snake Head Y Delta Position
+    mov qword[rbp - 30], 0 ; Reserved For The Keyboard File Descriptor
 
     ; Allocate Snake Buffer
     sub rsp, SNAKE_BUFFER_SIZE_ALIGNED
@@ -169,79 +178,114 @@ setup_initial_memory:
 
     mov qword[rbp - 12], rsp ; Save The Memory Address Of The Snake Buffer
 
+open_keyboard_input_file:
+    ; Open The Keyboard Event File
+    mov rax, 2 ; sys_open
+    mov rdi, KEYBOARD_EVENT_FILE_PATH  ; Filename ptr
+    mov rsi, KEYBOARD_EVENT_FILE_FLAGS ; Flags
+    syscall
+
+    ; Save Keyboard File Descriptor
+    mov qword[rbp - 30], rax 
+
+    ; TODO:: ERROR CHECKING
+
 game_loop_body:
     ; Sleep Until Next Iteration
     mov rdi, 1 ; s
     mov rsi, 0 ; ns
     call sleep_for
 
-    ; Unrender tail
-    mov   r8,  qword[rbp - 12] ; Snake Buffer Pointer
-    movzx r9, word[rbp - 2]
-    shl r9, 1
-    movzx rdi, byte[r8 + r9 - 2] ; Cell X Position
-    movzx rsi, byte[r8 + r9 - 1] ; Cell Y Position
-    mov   rdx, EMPTY_CHAR
-    mov   rcx, 1
-    call  print_string_at_position
-    
-    ; Setup Loop Index
-    movzx rax, word[rbp - 2] ; Snake Length
-    sub   rax, 1             ; Snake Length - 1 (i.e the tail's index)
+    read_keyboard_input:
+        mov rax, 7        ; sys_poll
+        lea rdi, [rbp - 30] ; Pointer To The File Descriptor
+        mov rsi, 1        ; Number Of File Descriptors
+        mov rdx, 100      ; Timeout (ms)
 
-    snake_loop_body:
-        ; Setup R8 To Point To The Memory Location Of The Current Cell's X Position
-        mov r8, qword[rbp - 12] ; Snake Buffer Pointer
-        shl rax, 1
-        add r8, rax
-        shr rax, 1
-
-        ; Move Cell
         cmp rax, 0
-        je move_snake_head_cell
+        je  game_loop_body_continue
 
-        move_snake_generic_cell: ; Move Non Head Cell
-            mov cl, byte[r8 - 2] ; New Cell X Position
-            mov byte[r8], cl     ; Store New X
+        ; Read File
+        sub rsp, INPUT_EVENT_BUFFER_SIZE ;
 
-            mov cl, byte[r8 - 1] ; New Cell Y Position
-            mov byte[r8 + 1], cl ; Store New Y
+        mov rax, 0 ; sys_read
+        mov rdi, qword[rbp - 30]
+        mov rsi, rsp ; buffer
+        mov rdx, INPUT_EVENT_BUFFER_SIZE ; buffer length
+        syscall
 
-        jmp snake_loop_body_continue
+        ; Loop Through Every Single Input Event
 
-        move_snake_head_cell: ; Move Head Cell
-            mov cl, byte[r8]       ; Fetch Cell X Position
-            add cl, byte[rbp - 21] ; Snake Head X Delta Movement
-            mov byte[r8], cl       ; Store New X
+        add rsp, INPUT_EVENT_BUFFER_SIZE
 
-            mov cl, byte[r8 + 1]   ; Fetch Cell Y Position
-            add cl, byte[rbp - 22] ; Snake Head Y Delta Movement
-            mov byte[r8 + 1], cl   ; Store New Y
+    game_loop_body_continue:
+        ; Unrender tail
+        mov   r8,  qword[rbp - 12] ; Snake Buffer Pointer
+        movzx r9, word[rbp - 2]
+        shl r9, 1
+        movzx rdi, byte[r8 + r9 - 2] ; Cell X Position
+        movzx rsi, byte[r8 + r9 - 1] ; Cell Y Position
+        mov   rdx, EMPTY_CHAR
+        mov   rcx, 1
+        call  print_string_at_position
+        
+        ; Setup Loop Index
+        movzx rax, word[rbp - 2] ; Snake Length
+        sub   rax, 1             ; Snake Length - 1 (i.e the tail's index)
 
-        snake_loop_body_continue:
-            ; Save RAX
-            mov qword[rbp - 20], rax
+        snake_loop_body:
+            ; Setup R8 To Point To The Memory Location Of The Current Cell's X Position
+            mov r8, qword[rbp - 12] ; Snake Buffer Pointer
+            shl rax, 1
+            add r8, rax
+            shr rax, 1
 
-            ; Print The Snake Cell
-            movzx rdi, byte[r8]     ; Cell X Position
-            movzx rsi, byte[r8 + 1] ; Cell Y Position
-            mov   rdx, SNAKE_CHAR
-            mov   rcx, 1
-            call  print_string_at_position
-
-            ; Restore RAX
-            mov rax, qword[rbp - 20]
-
-            ; End the loop if this was the last cell's index (i.e the head's)
+            ; Move Cell
             cmp rax, 0
-            je  snake_loop_end
+            je move_snake_head_cell
 
-            ; Otherwise, continue to loop backwards through the snake
-            sub rax, 1
-            jmp snake_loop_body
+            move_snake_generic_cell: ; Move Non Head Cell
+                mov cl, byte[r8 - 2] ; New Cell X Position
+                mov byte[r8], cl     ; Store New X
 
-    snake_loop_end:
-        jmp game_loop_body
+                mov cl, byte[r8 - 1] ; New Cell Y Position
+                mov byte[r8 + 1], cl ; Store New Y
+
+            jmp snake_loop_body_continue
+
+            move_snake_head_cell: ; Move Head Cell
+                mov cl, byte[r8]       ; Fetch Cell X Position
+                add cl, byte[rbp - 21] ; Snake Head X Delta Movement
+                mov byte[r8], cl       ; Store New X
+
+                mov cl, byte[r8 + 1]   ; Fetch Cell Y Position
+                add cl, byte[rbp - 22] ; Snake Head Y Delta Movement
+                mov byte[r8 + 1], cl   ; Store New Y
+
+            snake_loop_body_continue:
+                ; Save RAX
+                mov qword[rbp - 20], rax
+
+                ; Print The Snake Cell
+                movzx rdi, byte[r8]     ; Cell X Position
+                movzx rsi, byte[r8 + 1] ; Cell Y Position
+                mov   rdx, SNAKE_CHAR
+                mov   rcx, 1
+                call  print_string_at_position
+
+                ; Restore RAX
+                mov rax, qword[rbp - 20]
+
+                ; End the loop if this was the last cell's index (i.e the head's)
+                cmp rax, 0
+                je  snake_loop_end
+
+                ; Otherwise, continue to loop backwards through the snake
+                sub rax, 1
+                jmp snake_loop_body
+
+        snake_loop_end:
+            jmp game_loop_body
 
 game_loop_end:
 
@@ -266,4 +310,4 @@ CLEAR_STDOUT_CMD_LEN:     equ $-CLEAR_STDOUT_CMD
 MOVE_CURSOR_CMD:          db  0x1B, "[%d;%df", 0
 STTY_HIDE_USER_INPUT_CMD: db  "stty -echo", 0
 STTY_SHOW_USER_INPUT_CMD: db  "stty echo",  0
-KEYBOARD_EVENT_FILE_PATH: db  "/dev/input/event10" ; Can Vary
+KEYBOARD_EVENT_FILE_PATH: db  "/dev/input/event10", 0 ; Can Vary
