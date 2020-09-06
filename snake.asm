@@ -203,7 +203,7 @@ game_loop_body:
         mov rax, 7        ; sys_poll
         lea rdi, [rbp - 40] ; Pointer To The pollfd structure
         mov rsi, 1        ; Number Of File Descriptors
-        mov rdx, 100      ; Timeout (ms)
+        mov rdx, 1000     ; Timeout (ms)
         syscall 
 
         cmp rax, 0
@@ -231,10 +231,33 @@ game_loop_body:
 
             movzx rdx, word[rsp + 18] ; struct input_event -> code
             cmp   rdx, 108
-            jne read_keyboard_input_loop_next
+            je snake_move_down
+            cmp   rdx, 103
+            je snake_move_up
+            cmp   rdx, 105
+            je snake_move_left
+            cmp   rdx, 106
+            je snake_move_right
+            jmp read_keyboard_input_loop_next
 
-            mov byte[rbp - 21], 0
-            mov byte[rbp - 22], 1
+            snake_move_left:
+                mov byte[rbp - 21], -1
+                mov byte[rbp - 22], 0
+                jmp read_keyboard_input_loop_next
+
+            snake_move_right:
+                mov byte[rbp - 21], 1
+                mov byte[rbp - 22], 0
+                jmp read_keyboard_input_loop_next
+
+            snake_move_up:
+                mov byte[rbp - 21], 0
+                mov byte[rbp - 22], -1
+                jmp read_keyboard_input_loop_next
+
+            snake_move_down:
+                mov byte[rbp - 21], 0
+                mov byte[rbp - 22], 1
 
             read_keyboard_input_loop_next:
                 add rdi, INPUT_EVENT_STRUCT_SIZE
