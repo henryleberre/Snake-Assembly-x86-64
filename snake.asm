@@ -8,13 +8,16 @@ global main
 %define SNAKE_BUFFER_SIZE         (PIXEL_COUNT * 2)
 %define SNAKE_BUFFER_SIZE_ALIGNED (SNAKE_BUFFER_SIZE & 0xFFFFFFFFF0)
 
-%define O_RDONLY                  (0)
-%define O_NONBLOCK                (00004000)
+%define O_RDONLY                  (0x0000)
+%define O_NONBLOCK                (0x0004)
 %define KEYBOARD_EVENT_FILE_FLAGS (O_RDONLY | O_NONBLOCK)
 
 %define INPUT_EVENT_STRUCT_SIZE   (24)
 %define INPUT_EVENT_BUFFER_LENGTH (100)
 %define INPUT_EVENT_BUFFER_SIZE (INPUT_EVENT_STRUCT_SIZE * INPUT_EVENT_BUFFER_LENGTH)
+
+%define POLLIN 0x001
+%define EV_KEY 0x001
 
 ; External LIBC Functions (I try to use as less as possible here)
 extern system
@@ -167,7 +170,11 @@ setup_initial_memory:
     mov qword[rbp - 20], 0 ; Resorved For Saving A Register Value
     mov byte [rbp - 21], 1 ; Snake Head X Delta Position
     mov byte [rbp - 22], 0 ; Snake Head Y Delta Position
-    mov qword[rbp - 30], 0 ; Reserved For The Keyboard File Descriptor
+    ; --- unused bytes ---
+    ; Allocate a struct pollfd
+    mov word [rbp - 34], 0      ; (short) revents
+    mov word [rbp - 36], POLLIN ; (short) events
+    mov dword[rbp - 40], 0 ; (int) fd --> Reserved For The Keyboard File Descriptor
 
     ; Allocate Snake Buffer
     sub rsp, SNAKE_BUFFER_SIZE_ALIGNED
@@ -183,24 +190,21 @@ open_keyboard_input_file:
     mov rax, 2 ; sys_open
     mov rdi, KEYBOARD_EVENT_FILE_PATH  ; Filename ptr
     mov rsi, KEYBOARD_EVENT_FILE_FLAGS ; Flags
+    mov rdx, 0
     syscall
 
     ; Save Keyboard File Descriptor
-    mov qword[rbp - 30], rax 
+    mov dword[rbp - 40], eax
 
     ; TODO:: ERROR CHECKING
 
 game_loop_body:
-    ; Sleep Until Next Iteration
-    mov rdi, 1 ; s
-    mov rsi, 0 ; ns
-    call sleep_for
-
     read_keyboard_input:
         mov rax, 7        ; sys_poll
-        lea rdi, [rbp - 30] ; Pointer To The File Descriptor
+        lea rdi, [rbp - 40] ; Pointer To The pollfd structure
         mov rsi, 1        ; Number Of File Descriptors
         mov rdx, 100      ; Timeout (ms)
+        syscall 
 
         cmp rax, 0
         je  game_loop_body_continue
@@ -208,15 +212,35 @@ game_loop_body:
         ; Read File
         sub rsp, INPUT_EVENT_BUFFER_SIZE ;
 
-        mov rax, 0 ; sys_read
-        mov rdi, qword[rbp - 30]
-        mov rsi, rsp ; buffer
-        mov rdx, INPUT_EVENT_BUFFER_SIZE ; buffer length
+        mov   rax, 0 ; sys_read
+        mov   edi, dword[rbp - 40]
+        mov   rsi, rsp ; buffer
+        mov   rdx, INPUT_EVENT_BUFFER_SIZE ; buffer length
         syscall
 
         ; Loop Through Every Single Input Event
+        mov rdi, 0 ; current offset
 
-        add rsp, INPUT_EVENT_BUFFER_SIZE
+        read_keyboard_input_loop_body:
+            cmp rdi, rax
+            jge read_keyboard_input_loop_end
+
+            movzx rdx, word[rsp + 16] ; struct input_event -> type
+            cmp   rdx, EV_KEY
+            jne read_keyboard_input_loop_next
+
+            movzx rdx, word[rsp + 18] ; struct input_event -> code
+            cmp   rdx, 108
+            jne read_keyboard_input_loop_next
+
+            mov byte[rbp - 21], 0
+            mov byte[rbp - 22], 1
+
+            read_keyboard_input_loop_next:
+                add rdi, INPUT_EVENT_STRUCT_SIZE
+
+        read_keyboard_input_loop_end:        
+            add rsp, INPUT_EVENT_BUFFER_SIZE
 
     game_loop_body_continue:
         ; Unrender tail
@@ -285,6 +309,11 @@ game_loop_body:
                 jmp snake_loop_body
 
         snake_loop_end:
+            ; Sleep Until Next Iteration
+            mov rdi, 1 ; s
+            mov rsi, 0 ; ns
+            call sleep_for
+
             jmp game_loop_body
 
 game_loop_end:
@@ -310,4 +339,4 @@ CLEAR_STDOUT_CMD_LEN:     equ $-CLEAR_STDOUT_CMD
 MOVE_CURSOR_CMD:          db  0x1B, "[%d;%df", 0
 STTY_HIDE_USER_INPUT_CMD: db  "stty -echo", 0
 STTY_SHOW_USER_INPUT_CMD: db  "stty echo",  0
-KEYBOARD_EVENT_FILE_PATH: db  "/dev/input/event10", 0 ; Can Vary
+KEYBOARD_EVENT_FILE_PATH: db  "/dev/input/event7", 0 ; Can Vary
