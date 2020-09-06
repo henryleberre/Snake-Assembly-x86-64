@@ -164,8 +164,8 @@ setup_initial_memory:
     ; Allocate Temporary Variables
     sub rsp, 64
     mov word [rbp - 2],  2 ; Snake Length
-    mov byte [rbp - 3],  0 ; Apple X Position
-    mov byte [rbp - 4],  0 ; Apple Y Position
+    mov byte [rbp - 3],  5 ; Apple X Position
+    mov byte [rbp - 4],  5 ; Apple Y Position
     mov qword[rbp - 12], 0 ; Reserved For The Memory Address Of The Snake Buffer
     mov qword[rbp - 20], 0 ; Resorved For Saving A Register Value
     mov byte [rbp - 21], 1 ; Snake Head X Delta Position
@@ -337,7 +337,40 @@ game_loop_body:
             mov rsi, 0 ; ns
             call sleep_for
 
-            jmp game_loop_body
+        mov rax, 0
+        snake_apple_hit_detection_loop_body:
+            movzx rdi, word[rbp - 2]
+            shl   rdi, 2
+            cmp rax, rdi
+            je snake_apple_hit_detection_loop_end
+
+            mov r8, qword[rbp - 12] ; Snake Buffer Pointer
+
+            movzx rdi, byte[rbp - 3]
+            movzx rsi, byte[r8 + rax]
+            jne snake_apple_hit_detection_loop_next_iteration
+
+            movzx rdi, byte[rbp - 4]
+            movzx rsi, byte[r8 + rax + 1]
+            jne snake_apple_hit_detection_loop_next_iteration
+
+            movzx rax, word[rbp - 2]
+            inc rax
+            mov word[rbp - 2], ax
+            jmp snake_apple_hit_detection_loop_end
+
+            snake_apple_hit_detection_loop_next_iteration:
+                add rax, 2
+
+        snake_apple_hit_detection_loop_end:
+        print_apple:
+            movzx rdi, byte[rbp - 3]
+            movzx rsi, byte[rbp - 4]
+            mov   rdx, APPLE_CHAR
+            mov   rcx, 1
+            call print_string_at_position
+
+        jmp game_loop_body
 
 game_loop_end:
 
@@ -357,6 +390,7 @@ section .data
 
 EMPTY_CHAR:               db  ' '
 SNAKE_CHAR:               db  'O'
+APPLE_CHAR:               db  'A'
 CLEAR_STDOUT_CMD:         db  27,"[H",27,"[2J"
 CLEAR_STDOUT_CMD_LEN:     equ $-CLEAR_STDOUT_CMD
 MOVE_CURSOR_CMD:          db  0x1B, "[%d;%df", 0
